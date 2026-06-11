@@ -1,6 +1,6 @@
 import express from 'express';
 import multer from 'multer';
-import { uploadToCloudinary } from '../services/imageService.js';
+import { uploadToCloudinary } from '../services/ImageService.js';
 import { authenticateAdmin } from '../middleware/authenticator.js';
 
 const router = express.Router();
