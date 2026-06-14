@@ -30,10 +30,10 @@ if (!mongoseLink) {
 }
 
 // Create uploads directory if it doesn't exist
-const uploadsDir = join(__dirname, 'uploads');
-if (!fs.existsSync(uploadsDir)) {
-    fs.mkdirSync(uploadsDir, { recursive: true });
-}
+// const uploadsDir = join(__dirname, 'uploads');
+// if (!fs.existsSync(uploadsDir)) {
+//     fs.mkdirSync(uploadsDir, { recursive: true });
+// }
 
 const app = express();
 app.use(express.json());
