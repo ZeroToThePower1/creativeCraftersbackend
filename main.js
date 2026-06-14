@@ -38,7 +38,10 @@ const uploadsDir = join(__dirname, 'uploads');
 const app = express();
 app.use(express.json());
 app.use(cors({
-    origin: '*'
+    origin: ['https://project-etg41.vercel.app', 'http://localhost:3000'],
+    credentials: true,
+    methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
+    allowedHeaders: ['Content-Type', 'Authorization']
 }));
 
 // Serve static files from uploads directory
