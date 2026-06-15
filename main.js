@@ -11,7 +11,6 @@ import aboutRoutes from './routes/about.js';
 import uploadRoutes from './routes/upload.js';
 import contactRoutes from './routes/contact.js';
 
-
 dotenv.config();
 
 import user from './models/user.js';
@@ -31,9 +30,6 @@ if (!mongoseLink) {
 
 // Create uploads directory if it doesn't exist
 const uploadsDir = join(__dirname, 'uploads');
-// if (!fs.existsSync(uploadsDir)) {
-//     fs.mkdirSync(uploadsDir, { recursive: true });
-// }
 
 const app = express();
 app.use(express.json());
@@ -64,25 +60,25 @@ async function connectdb() {
 }
 connectdb();
 
+// Pending Registration Schema (defined inline)
+const pendingRegistrationSchema = new mongoose.Schema({
+    email: { type: String, required: true, unique: true },
+    name: { type: String, required: true },
+    phone: { type: String, required: true },
+    password: { type: String, required: true },
+    address: { type: String, required: true },
+    otp: { type: String, required: true },
+    otpExpire: { type: Date, required: true },
+    createdAt: { type: Date, default: Date.now, expires: '10m' } // Auto-delete after 10 minutes
+});
+
+const PendingRegistration = mongoose.model('PendingRegistration', pendingRegistrationSchema);
+
 function generateOTP(expiry) {
     const otp = Math.floor(Math.random() * 1000000).toString().padStart(6, '0');
     const expiry_Date = new Date(Date.now() + (expiry * 60 * 1000));
     return { otp, expiry_Date };
 }
-
-// Temporary storage for pending registrations
-const pendingRegistrations = new Map();
-
-// Clean up expired pending registrations every hour
-setInterval(() => {
-    const now = Date.now();
-    for (const [email, data] of pendingRegistrations.entries()) {
-        if (data.otpExpire < now) {
-            pendingRegistrations.delete(email);
-            console.log(`Cleaned up expired registration for ${email}`);
-        }
-    }
-}, 60 * 60 * 1000);
 
 // Clean up unverified users older than 24 hours
 async function cleanupUnverifiedUsers() {
@@ -105,8 +101,6 @@ async function cleanupUnverifiedUsers() {
 // Run cleanup every hour
 setInterval(cleanupUnverifiedUsers, 60 * 60 * 1000);
 cleanupUnverifiedUsers();
-
-
 
 // Step 1: Send OTP and store pending registration
 app.post('/sendotp', async (req, res) => {
@@ -141,10 +135,12 @@ app.post('/sendotp', async (req, res) => {
             });
         }
 
-        // Check if email is already in pending registration
-        if (pendingRegistrations.has(email)) {
-            const pending = pendingRegistrations.get(email);
-            if (pending.otpExpire > Date.now()) {
+        // Check if email already has a pending registration
+        let pending = await PendingRegistration.findOne({ email: email });
+        
+        if (pending) {
+            // Check if OTP is still valid
+            if (pending.otpExpire > new Date()) {
                 await sendEmail(email, "verification", pending.otp);
                 console.log(`✅ Resent OTP to ${email}: ${pending.otp}`);
                 return res.status(200).json({ 
@@ -152,7 +148,8 @@ app.post('/sendotp', async (req, res) => {
                     email: email
                 });
             } else {
-                pendingRegistrations.delete(email);
+                // Delete expired pending registration
+                await PendingRegistration.deleteOne({ email: email });
             }
         }
 
@@ -163,16 +160,15 @@ app.post('/sendotp', async (req, res) => {
         await sendEmail(email, "verification", otp);
         console.log(`✅ OTP sent to ${email}: ${otp}`);
 
-        // Store registration data temporarily
-        pendingRegistrations.set(email, {
+        // Store registration data in database
+        await PendingRegistration.create({
             name: data.name,
             email: data.email,
             phone: data.phone,
             password: data.password,
             address: data.address,
             otp: otp,
-            otpExpire: expiry_Date.getTime(),
-            createdAt: Date.now()
+            otpExpire: expiry_Date
         });
 
         res.status(200).json({ 
@@ -241,15 +237,16 @@ app.post('/verifyotp', async (req, res) => {
             });
         }
         
-        // Check pending registration
-        const pending = pendingRegistrations.get(email);
+        // Check pending registration from database
+        const pending = await PendingRegistration.findOne({ email: email });
+        
         if (!pending) {
             return res.status(404).json({ message: "No pending registration found. Please start over." });
         }
 
         // Check if OTP is expired
-        if (pending.otpExpire < Date.now()) {
-            pendingRegistrations.delete(email);
+        if (pending.otpExpire < new Date()) {
+            await PendingRegistration.deleteOne({ email: email });
             return res.status(400).json({ message: "OTP expired. Please request a new one." });
         }
 
@@ -258,7 +255,7 @@ app.post('/verifyotp', async (req, res) => {
             return res.status(400).json({ message: "Invalid OTP" });
         }
 
-        // IMPORTANT: Check again for phone number uniqueness before saving
+        // Check for phone number uniqueness
         const existingPhone = await user.findOne({ phone: pending.phone });
         if (existingPhone) {
             return res.status(400).json({ message: "Phone number already exists" });
@@ -283,8 +280,8 @@ app.post('/verifyotp', async (req, res) => {
 
         const savedUser = await newUser.save();
 
-        // Remove from pending registrations
-        pendingRegistrations.delete(email);
+        // Remove pending registration
+        await PendingRegistration.deleteOne({ email: email });
 
         // Generate JWT token
         const token = jwt.sign(
@@ -313,7 +310,6 @@ app.post('/verifyotp', async (req, res) => {
         console.error('Error in /verifyotp:', err);
         
         if (err.code === 11000) {
-            // This will catch any duplicate key errors
             const field = Object.keys(err.keyPattern)[0];
             return res.status(400).json({ message: `${field} already exists` });
         }
@@ -321,6 +317,7 @@ app.post('/verifyotp', async (req, res) => {
         res.status(500).json({ message: "Internal server error" });
     }
 });
+
 // Resend OTP endpoint
 app.post('/resend-otp', async (req, res) => {
     try {
@@ -330,8 +327,9 @@ app.post('/resend-otp', async (req, res) => {
             return res.status(400).json({ message: "Email is required" });
         }
         
-        // Check pending registration
-        const pending = pendingRegistrations.get(email);
+        // Check pending registration in database
+        let pending = await PendingRegistration.findOne({ email: email });
+        
         if (!pending) {
             return res.status(404).json({ message: "No pending registration found" });
         }
@@ -341,8 +339,8 @@ app.post('/resend-otp', async (req, res) => {
         
         // Update pending registration
         pending.otp = otp;
-        pending.otpExpire = expiry_Date.getTime();
-        pendingRegistrations.set(email, pending);
+        pending.otpExpire = expiry_Date;
+        await pending.save();
         
         // Send new OTP
         await sendEmail(email, "verification", otp);
