@@ -195,7 +195,17 @@ app.post('/verifyotp', async (req, res) => {
             return res.status(400).json({ message: "Email and OTP are required" });
         }
 
-        // First check if user already exists but not verified
+        // FIRST: Check if user already exists AND is verified
+        let existingVerifiedUser = await user.findOne({ 
+            email: email,
+            verified: true 
+        });
+        
+        if (existingVerifiedUser) {
+            return res.status(400).json({ message: "Email already exists and is verified" });
+        }
+
+        // THEN: Check if user exists but not verified
         let userDoc = await user.findOne({ email: email });
         
         if (userDoc && !userDoc.verified) {
@@ -248,6 +258,12 @@ app.post('/verifyotp', async (req, res) => {
             return res.status(400).json({ message: "Invalid OTP" });
         }
 
+        // IMPORTANT: Check again for phone number uniqueness before saving
+        const existingPhone = await user.findOne({ phone: pending.phone });
+        if (existingPhone) {
+            return res.status(400).json({ message: "Phone number already exists" });
+        }
+
         // Hash password
         const salt = await bcrypt.genSalt(10);
         const hashedPassword = await bcrypt.hash(pending.password, salt);
@@ -297,13 +313,14 @@ app.post('/verifyotp', async (req, res) => {
         console.error('Error in /verifyotp:', err);
         
         if (err.code === 11000) {
-            return res.status(400).json({ message: "Email or phone already exists" });
+            // This will catch any duplicate key errors
+            const field = Object.keys(err.keyPattern)[0];
+            return res.status(400).json({ message: `${field} already exists` });
         }
         
         res.status(500).json({ message: "Internal server error" });
     }
 });
-
 // Resend OTP endpoint
 app.post('/resend-otp', async (req, res) => {
     try {
