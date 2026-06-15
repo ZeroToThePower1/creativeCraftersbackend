@@ -69,7 +69,7 @@ const pendingRegistrationSchema = new mongoose.Schema({
     address: { type: String, required: true },
     otp: { type: String, required: true },
     otpExpire: { type: Date, required: true },
-    createdAt: { type: Date, default: Date.now, expires: '10m' } // Auto-delete after 10 minutes
+    createdAt: { type: Date, default: Date.now, expires: '1m' } // Auto-delete after 10 minutes
 });
 
 const PendingRegistration = mongoose.model('PendingRegistration', pendingRegistrationSchema);
